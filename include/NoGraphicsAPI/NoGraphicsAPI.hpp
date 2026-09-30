@@ -446,12 +446,14 @@ struct DeviceCaps
     bool indirect_mesh_draw = false;
 };
 
-// Win32 windowed device creation/destruction, drawable queries, acquire, and presentation stay on the window's message-pump thread.
+// Win32/X11 windowed device creation/destruction, drawable queries, acquire, and presentation stay on the window's message-pump thread.
 // Metal calls may use a render thread; synchronize CAMetalLayer access with native UI/layer changes.
 // The window/layer must outlive the device. Other calls follow the object-level threading contract below.
 struct DeviceDesc
 {
-    void* window = nullptr; // HWND on Windows; CAMetalLayer* on macOS/iOS. Null creates a headless device.
+    // HWND on Windows; X11 Window (XID) cast to void* on Linux; CAMetalLayer* on macOS/iOS. Null creates a headless device.
+    void* window = nullptr;
+    void* display = nullptr; // X11 Display* on Linux, required with a window; ignored elsewhere.
     Format swapchain_format = Format::undefined;
     uint32 desired_swapchain_image_count = 2; // Vulkan: 1..8 presentation contexts. Metal clamps to 2..3 drawables.
     // Counts are capped to each family's capacity. A nonzero request requires that kind of queue to be available.

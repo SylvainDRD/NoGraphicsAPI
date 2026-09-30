@@ -9,6 +9,8 @@
 #endif
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <windows.h>
+#else
+#define VK_USE_PLATFORM_XLIB_KHR
 #endif
 
 #include <vulkan/vulkan.h>
@@ -42,6 +44,11 @@ constexpr uint32 max_swapchain_images = 8;
 constexpr VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_FIFO_KHR;
 constexpr uint32 gpu_allocation_alignment = 16;
 constexpr uint32 max_surface_formats = 64;
+#if defined(_WIN32)
+constexpr const char* platform_surface_extension = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#else
+constexpr const char* platform_surface_extension = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
+#endif
 constexpr uint32 format_count = static_cast<uint32>(Format::undefined);
 
 enum class DescriptorHeapType : uint8
@@ -1607,8 +1614,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     assert(desc.desired_swapchain_image_count != 0 && desc.desired_swapchain_image_count <= max_swapchain_images &&
            "swapchain image count must fit the wrapper's presentation context array");
 #if !defined(_WIN32)
-    if (presentation)
-        return {.error = Error::unsupported};
+    assert((!presentation || desc.display) && "X11 presentation requires DeviceDesc::display");
 #endif
 
     uint32 loader_version = VK_API_VERSION_1_0;
@@ -1626,7 +1632,6 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     error = enumerate_instance_extensions({instance_extensions, max_instance_extensions}, instance_extension_count);
     if (error != Error::none)
         return fail_device_creation(state, error);
-#if defined(_WIN32)
     const bool khr_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
         VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
@@ -1637,17 +1642,13 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         (!has_name({instance_extensions, instance_extension_count},
                    VK_KHR_SURFACE_EXTENSION_NAME) ||
          !has_name({instance_extensions, instance_extension_count},
-                   VK_KHR_WIN32_SURFACE_EXTENSION_NAME) ||
+                   platform_surface_extension) ||
          !has_name({instance_extensions, instance_extension_count},
                    VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) ||
          (!khr_surface_maintenance1 && !ext_surface_maintenance1)))
     {
         return fail_device_creation(state, Error::unsupported);
     }
-#else
-    constexpr bool khr_surface_maintenance1 = false;
-    constexpr bool ext_surface_maintenance1 = false;
-#endif
 #if !defined(NDEBUG)
     VkLayerProperties layers[max_instance_layers]{};
     uint32 layer_count = 0;
@@ -1666,18 +1667,16 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     if (debug_utils_available) enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
     if (validation_available) enabled_layers[enabled_layer_count++] = "VK_LAYER_KHRONOS_validation";
 #endif
-#if defined(_WIN32)
     if (presentation)
     {
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
-        enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+        enabled_instance_extensions[enabled_instance_extension_count++] = platform_surface_extension;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
         if (khr_surface_maintenance1)
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
         if (ext_surface_maintenance1)
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME;
     }
-#endif
 
     const VkApplicationInfo app_info{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -1720,19 +1719,26 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     }
 #endif
 
-#if defined(_WIN32)
     if (presentation)
     {
+#if defined(_WIN32)
         const VkWin32SurfaceCreateInfoKHR surface_info{
             .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
             .hinstance = GetModuleHandleW(nullptr),
             .hwnd = static_cast<HWND>(desc.window),
         };
         error = error_from_vk(vkCreateWin32SurfaceKHR(state->instance, &surface_info, nullptr, &state->surface));
+#else
+        const VkXlibSurfaceCreateInfoKHR surface_info{
+            .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+            .dpy = static_cast<Display*>(desc.display),
+            .window = static_cast<Window>(reinterpret_cast<uintptr>(desc.window)),
+        };
+        error = error_from_vk(vkCreateXlibSurfaceKHR(state->instance, &surface_info, nullptr, &state->surface));
+#endif
         if (error != Error::none)
             return fail_device_creation(state, error);
     }
-#endif
 
     VkPhysicalDevice physical_devices[max_physical_devices]{};
     uint32 physical_device_count = 0;
@@ -1846,7 +1852,6 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME;
     }
     enabled_device_extensions[enabled_device_extension_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
-#if defined(_WIN32)
     if (presentation)
     {
         enabled_device_extensions[enabled_device_extension_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
@@ -1854,7 +1859,6 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
             ? VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME
             : VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME;
     }
-#endif
     const VkDeviceCreateInfo device_info{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &enabled_features.core,
