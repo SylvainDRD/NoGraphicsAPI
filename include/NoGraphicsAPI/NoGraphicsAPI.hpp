@@ -446,6 +446,8 @@ struct DeviceCaps
     bool indirect_mesh_draw = false;
 };
 
+enum class ColorSpace : uint32 { srgb, extended_srgb_linear };
+
 // Win32 windowed device creation/destruction, drawable queries, acquire, and presentation stay on the window's message-pump thread.
 // Metal calls may use a render thread; synchronize CAMetalLayer access with native UI/layer changes.
 // The window/layer must outlive the device. Other calls follow the object-level threading contract below.
@@ -453,6 +455,7 @@ struct DeviceDesc
 {
     void* window = nullptr; // HWND on Windows; CAMetalLayer* on macOS/iOS. Null creates a headless device.
     Format swapchain_format = Format::undefined;
+    ColorSpace swapchain_color_space = ColorSpace::srgb;
     uint32 desired_swapchain_image_count = 2; // Vulkan: 1..8 presentation contexts. Metal clamps to 2..3 drawables.
     // Counts are capped to each family's capacity. A nonzero request requires that kind of queue to be available.
     uint32 desired_queue_count = 1; // General graphics + compute queues; must be nonzero.

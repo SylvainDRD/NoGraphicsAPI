@@ -603,6 +603,8 @@ id<MTLBuffer> resolve_buffer(Device* device, GpuRange range, uint64* offset)
 
 DeviceInit create_device(const DeviceDesc& desc) noexcept
 {
+    if (desc.swapchain_color_space != ColorSpace::srgb)
+        return {.error = Error::unsupported};
     @autoreleasepool
     {
         Device* device = new Device{};

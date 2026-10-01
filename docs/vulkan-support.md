@@ -281,6 +281,13 @@ message-pump thread; other work follows the threading rules above. Binary WSI se
 `VK_KHR_swapchain_maintenance1` present fences support safe reuse and swapchain replacement without
 draining unrelated queue work.
 
+`DeviceDesc::swapchain_color_space` defaults to `ColorSpace::srgb`. Opting into
+`ColorSpace::extended_srgb_linear` enables `VK_EXT_swapchain_colorspace` and requires an advertised
+format/color-space pair; use `Format::rgba16_float` with extended-linear-sRGB for FP16 scRGB output.
+Unsupported requests fail device creation. Resize preserves the selected pair. The application owns
+display/HDR-state detection and must supply pixels in the selected color space; the backend does not
+change OS display settings or tone-map output.
+
 ## Validation
 
 The tests cover the public CPU-facing contracts, while the examples exercise representative GPU

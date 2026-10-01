@@ -1277,6 +1277,7 @@ struct Swapchain
     uint32 width = 0;
     uint32 height = 0;
     Format format = Format::bgra8_srgb;
+    VkColorSpaceKHR color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     detail::PresentContext* present_context = nullptr;
@@ -1627,6 +1628,9 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     if (error != Error::none)
         return fail_device_creation(state, error);
 #if defined(_WIN32)
+    if (presentation && desc.swapchain_color_space != ColorSpace::srgb &&
+        !has_name({instance_extensions, instance_extension_count}, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME))
+        return fail_device_creation(state, Error::unsupported);
     const bool khr_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
         VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
@@ -1658,7 +1662,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool validation_available = has_name({layers, layer_count}, "VK_LAYER_KHRONOS_validation");
 #endif
 
-    const char* enabled_instance_extensions[6]{};
+    const char* enabled_instance_extensions[7]{};
     uint32 enabled_instance_extension_count = 0;
     const char* enabled_layers[1]{};
     uint32 enabled_layer_count = 0;
@@ -1669,6 +1673,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
 #if defined(_WIN32)
     if (presentation)
     {
+        if (desc.swapchain_color_space != ColorSpace::srgb)
+            enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
@@ -1948,6 +1954,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         state->swapchain = new Swapchain;
         state->swapchain->state = state;
         state->swapchain->format = desc.swapchain_format;
+        state->swapchain->color_space = desc.swapchain_color_space == ColorSpace::extended_srgb_linear
+            ? VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
         error = recreate_swapchain(*state->swapchain);
         if (error != Error::none)
             return fail_device_creation(state, error);
@@ -2202,7 +2210,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     {
         if ((formats[index].format == requested_format ||
              formats[index].format == VK_FORMAT_UNDEFINED) &&
-            formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            formats[index].colorSpace == swapchain.color_space)
         {
             format_supported = true;
             break;
@@ -2229,7 +2237,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
         .surface = device.surface,
         .minImageCount = requested_image_count,
         .imageFormat = requested_format,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageColorSpace = swapchain.color_space,
         .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,

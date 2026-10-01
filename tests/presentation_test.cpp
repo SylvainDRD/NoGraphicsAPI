@@ -29,6 +29,7 @@ void pump_messages() noexcept
 int main(int argc, char** argv)
 {
     const bool queue_families = argc == 2 && strcmp(argv[1], "--queue-families") == 0;
+    const bool scrgb = argc == 2 && strcmp(argv[1], "--scrgb") == 0;
     const WNDCLASSEXA window_class{
         .cbSize = sizeof(WNDCLASSEXA),
         .lpfnWndProc = DefWindowProcA,
@@ -51,7 +52,8 @@ int main(int argc, char** argv)
 
     const gpu::DeviceInit device_init = gpu::create_device({
         .window = window,
-        .swapchain_format = gpu::Format::bgra8_srgb,
+        .swapchain_format = scrgb ? gpu::Format::rgba16_float : gpu::Format::bgra8_srgb,
+        .swapchain_color_space = scrgb ? gpu::ColorSpace::extended_srgb_linear : gpu::ColorSpace::srgb,
         .desired_queue_count = 2,
         .desired_compute_queue_count = queue_families ? 1u : 0u,
         .desired_copy_queue_count = queue_families ? 1u : 0u,
@@ -132,7 +134,7 @@ int main(int argc, char** argv)
         const gpu::ColorAttachment colors[]{{
             .render_view = frame.render_view,
             .load = gpu::LoadOp::clear,
-            .clear = {.x = float(frame_index) / 8.0f, .y = 0.25f, .z = 0.5f, .w = 1.0f},
+            .clear = {.x = float(frame_index) / 8.0f, .y = scrgb ? 2.5f : 0.25f, .z = scrgb ? 12.5f : 0.5f, .w = 1.0f},
         }};
         const gpu::RenderingDesc rendering{.colors = colors};
         const bool split_pass = (frame_index & 1u) != 0;
