@@ -485,6 +485,7 @@ struct TextureDesc
     Format format = Format::rgba8_unorm;
     bool mutable_format = false; // Allow format-compatible descriptor views, but could lose DCC.
     TextureUsage usage = TextureUsage::sampled;
+    bool aliasable = false; // Overlapping placements require activation before each period of use; contents are discarded.
 };
 
 struct RenderViewDesc
@@ -722,14 +723,18 @@ template<typename T>
 }
 
 // Texture heaps use one device-selected GPU-only memory type and must outlive every placed texture.
-// Placements must satisfy get_texture_size_align(), remain non-overlapping, and not be reused before the timeline point covering their last use completes.
+// Placements must satisfy get_texture_size_align(). Overlap is allowed only between aliasable textures with disjoint periods of GPU use.
+// Reusing a placement without alias activation requires completion of its last use and destruction of the old texture.
 // DeviceCaps::texture_heap_alignment can be used as a common allocator element size, avoiding per-placement leading alignment padding.
 [[nodiscard]] TextureHeap create_texture_heap(Device* device, uint64 byte_count) noexcept;
 void destroy_texture_heap(const TextureHeap& heap) noexcept;
 [[nodiscard]] SizeAlign get_texture_size_align(Device* device, const TextureDesc& desc) noexcept;
-// Records texture initialization into commands. Use outside of a render pass. Commands must be submitted before other use of the texture.
+// Records ordinary texture initialization into commands, outside a render pass. Submit before use. Aliasable textures defer initialization to activation.
 [[nodiscard]] Texture* create_texture(CommandBuffer* commands, const TextureDesc& desc, const TextureHeap& heap, uint64 offset) noexcept;
 void destroy_texture(Texture* texture) noexcept;
+// Activate an alias outside a render pass before its first use and whenever another alias has used its storage.
+// Discards contents and synchronizes prior uses on this queue; order other queues with timeline waits. Clear or overwrite before reading.
+void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept;
 [[nodiscard]] RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc = {}) noexcept;
 void destroy_render_view(RenderView* render_view) noexcept;
 // Descriptor slots form application-owned namespaces. Writes and copies require indices within capacity;

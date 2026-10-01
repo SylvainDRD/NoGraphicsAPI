@@ -150,9 +150,17 @@ Texture upload and readback go through buffer-backed `GpuRange` values with
 `copy_memory_to_texture()` and `copy_texture_to_memory()`. The application retires texture-heap ranges
 with its submission timeline.
 
-After all GPU use completes, a texture placement can be reused by destroying its views and image,
-then creating the replacement at the same aligned offset. The new image still needs its recorded
-initialization submitted before use. Simultaneously live images sharing a placement are not supported.
+`TextureDesc::aliasable` allows resident images and views to share a placement, with only one alias
+in use at a time. Reserve enough bytes and alignment for every image and use aliasable descriptions
+for both sizing and creation. Creation uses `VK_IMAGE_CREATE_ALIAS_BIT` and defers initialization.
+Descriptors and views can remain resident while the application selects the active alias.
+
+Before first use and each subsequent handoff, `activate_texture_alias()` records a global memory
+dependency followed by a whole-image discard transition from `UNDEFINED` to `GENERAL`. Record it
+outside rendering, after the previous alias's uses on the same queue; synchronize other queues with
+timeline waits. Clear or overwrite before reading: differently formatted aliases do not preserve
+each other's contents. The application manages overlapping ranges; the backend has no alias registry.
+See Vulkan's [memory aliasing rules](https://docs.vulkan.org/spec/latest/chapters/resources.html#resources-memory-aliasing).
 
 ## Root ABI
 

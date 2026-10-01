@@ -2509,6 +2509,7 @@ void prepare_texture(Device& device, const TextureDesc& desc, PreparedTexture& o
     }
 
     VkImageCreateFlags image_flags = 0;
+    if (desc.aliasable) image_flags |= VK_IMAGE_CREATE_ALIAS_BIT;
     if (desc.type == TextureType::cube || desc.type == TextureType::cube_array) image_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     if (view_format_count > 1) image_flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
 
@@ -2594,6 +2595,7 @@ Texture* create_texture(CommandBuffer* commands, const TextureDesc& desc, const 
     };
     require_vk(vkCreateImage(device->device, &texture.image_info, nullptr, &result->image));
     require_vk(vkBindImageMemory(device->device, result->image, heap.owner->memory, offset));
+    if (desc.aliasable) return result;
 
     const VkImageMemoryBarrier2 barrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -2618,6 +2620,43 @@ Texture* create_texture(CommandBuffer* commands, const TextureDesc& desc, const 
 void destroy_texture(Texture* texture) noexcept
 {
     delete texture;
+}
+
+void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept
+{
+    assert(commands && texture && commands->state == texture->state);
+    // The outgoing image can have a different format and size, so its writes need a global memory dependency.
+    const VkMemoryBarrier2 memory_barrier{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+    };
+    const VkDependencyInfo dependency{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &memory_barrier,
+    };
+    vkCmdPipelineBarrier2(commands->command_buffer, &dependency);
+    const VkImageMemoryBarrier2 image_barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = texture->image,
+        .subresourceRange = {
+            .aspectMask = image_aspects(texture->format),
+            .levelCount = VK_REMAINING_MIP_LEVELS,
+            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
+    record_image_barriers(commands->command_buffer, {&image_barrier, 1});
 }
 
 RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc) noexcept
