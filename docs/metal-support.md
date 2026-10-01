@@ -68,8 +68,10 @@ counts; NoGraphicsAPI does not emulate an indirect command.
 Metal 4 does not imply BC texture compression support. Query the required texture formats before
 choosing assets; ASTC is available throughout the baseline.
 
-Presentation currently supports only `ColorSpace::srgb`. `create_device()` returns `Error::unsupported`
-for `ColorSpace::extended_srgb_linear`; EDR layer configuration is not implemented.
+Presentation currently supports only `ColorSpace::srgb`. `create_device()` and `set_swapchain_format()`
+return `Error::unsupported` for `ColorSpace::extended_srgb_linear`; EDR layer configuration is not implemented.
+After `wait_idle()`, with no acquired frame, the setter accepts the current format or switches between
+`Format::bgra8_unorm` and `Format::bgra8_srgb` without replacing application resources.
 
 ## Synchronization
 

@@ -656,6 +656,7 @@ struct Device
     DeviceCaps caps;
     VkFormatFeatureFlags2 format_features[format_count]{};
     bool texture_compression_etc2 = false;
+    bool swapchain_color_space_enabled = false;
     VkSemaphore presentation_retirement = VK_NULL_HANDLE;
     uint64 presentation_retirement_value = 0;
     uint64 completed_presentation_retirement = 0;
@@ -1628,8 +1629,9 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     if (error != Error::none)
         return fail_device_creation(state, error);
 #if defined(_WIN32)
-    if (presentation && desc.swapchain_color_space != ColorSpace::srgb &&
-        !has_name({instance_extensions, instance_extension_count}, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME))
+    state->swapchain_color_space_enabled = presentation &&
+        has_name({instance_extensions, instance_extension_count}, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+    if (presentation && desc.swapchain_color_space != ColorSpace::srgb && !state->swapchain_color_space_enabled)
         return fail_device_creation(state, Error::unsupported);
     const bool khr_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
@@ -1673,7 +1675,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
 #if defined(_WIN32)
     if (presentation)
     {
-        if (desc.swapchain_color_space != ColorSpace::srgb)
+        if (state->swapchain_color_space_enabled)
             enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
@@ -2181,13 +2183,6 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     const VkExtent2D extent = capabilities.currentExtent;
     if (extent.width == UINT_MAX)
         return Error::unsupported;
-    if (extent.width == 0 || extent.height == 0)
-    {
-        swapchain.width = 0;
-        swapchain.height = 0;
-        swapchain.recreate_required = true;
-        return Error::none;
-    }
     if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0)
     {
         return Error::unsupported;
@@ -2218,6 +2213,14 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     }
     if (!format_supported)
         return Error::unsupported;
+
+    if (extent.width == 0 || extent.height == 0)
+    {
+        swapchain.width = 0;
+        swapchain.height = 0;
+        swapchain.recreate_required = true;
+        return Error::none;
+    }
 
     uint32 requested_image_count = device.present_context_count;
     if (requested_image_count < capabilities.minImageCount) requested_image_count = capabilities.minImageCount;
@@ -2325,6 +2328,34 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
 }
 
 } // namespace
+
+Error set_swapchain_format(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && !device->acquired_swapchain);
+    if (!device->swapchain || (color_space != ColorSpace::srgb && !device->swapchain_color_space_enabled))
+        return Error::unsupported;
+
+    Swapchain& swapchain = *device->swapchain;
+    const VkColorSpaceKHR requested_color_space = color_space == ColorSpace::extended_srgb_linear
+        ? VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    if (swapchain.format == format && swapchain.color_space == requested_color_space)
+        return Error::none;
+
+    const Format old_format = swapchain.format;
+    const VkColorSpaceKHR old_color_space = swapchain.color_space;
+    swapchain.format = format;
+    swapchain.color_space = requested_color_space;
+    const Error error = recreate_swapchain(swapchain);
+    if (error != Error::none)
+    {
+        swapchain.format = old_format;
+        swapchain.color_space = old_color_space;
+        // vkCreateSwapchainKHR retires oldSwapchain even when creation fails.
+        if (!swapchain.handle)
+            require_error(recreate_swapchain(swapchain));
+    }
+    return error;
+}
 
 uint32x2 get_drawable_extent(Device* device) noexcept
 {

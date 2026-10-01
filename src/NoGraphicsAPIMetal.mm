@@ -746,6 +746,22 @@ bool supports_texture_format(const Device* device, Format format, TextureUsage u
     return true;
 }
 
+Error set_swapchain_format(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && !device->drawable && !device->acquired);
+    @autoreleasepool
+    {
+        if (!device->layer || color_space != ColorSpace::srgb)
+            return Error::unsupported;
+        if (device->layer.pixelFormat == pixel_format(format))
+            return Error::none;
+        if (format != Format::bgra8_unorm && format != Format::bgra8_srgb)
+            return Error::unsupported;
+        device->layer.pixelFormat = pixel_format(format);
+        return Error::none;
+    }
+}
+
 uint32x2 get_drawable_extent(Device* device) noexcept
 {
     @autoreleasepool

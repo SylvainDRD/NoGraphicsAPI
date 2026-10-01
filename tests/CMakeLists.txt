@@ -121,8 +121,9 @@ if(WIN32)
     target_link_libraries(test_presentation PRIVATE NoGraphicsAPI::NoGraphicsAPI)
     add_test(NAME test_presentation COMMAND test_presentation)
     add_test(NAME test_presentation_scrgb COMMAND test_presentation --scrgb)
+    add_test(NAME test_presentation_color_space_switch COMMAND test_presentation --switch-color-space)
     add_test(NAME test_presentation_queue_families COMMAND test_presentation --queue-families)
-    set_tests_properties(test_presentation test_presentation_scrgb test_presentation_queue_families PROPERTIES
+    set_tests_properties(test_presentation test_presentation_scrgb test_presentation_color_space_switch test_presentation_queue_families PROPERTIES
         SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "NoGraphicsAPI validation:")
 endif()
 

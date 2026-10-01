@@ -150,6 +150,10 @@ Texture upload and readback go through buffer-backed `GpuRange` values with
 `copy_memory_to_texture()` and `copy_texture_to_memory()`. The application retires texture-heap ranges
 with its submission timeline.
 
+After all GPU use completes, a texture placement can be reused by destroying its views and image,
+then creating the replacement at the same aligned offset. The new image still needs its recorded
+initialization submitted before use. Simultaneously live images sharing a placement are not supported.
+
 ## Root ABI
 
 Each draw, mesh draw, and dispatch accepts a GPU root pointer. The backend pushes that eight-byte
@@ -281,12 +285,16 @@ message-pump thread; other work follows the threading rules above. Binary WSI se
 `VK_KHR_swapchain_maintenance1` present fences support safe reuse and swapchain replacement without
 draining unrelated queue work.
 
-`DeviceDesc::swapchain_color_space` defaults to `ColorSpace::srgb`. Opting into
-`ColorSpace::extended_srgb_linear` enables `VK_EXT_swapchain_colorspace` and requires an advertised
-format/color-space pair; use `Format::rgba16_float` with extended-linear-sRGB for FP16 scRGB output.
-Unsupported requests fail device creation. Resize preserves the selected pair. The application owns
-display/HDR-state detection and must supply pixels in the selected color space; the backend does not
-change OS display settings or tone-map output.
+`DeviceDesc::swapchain_color_space` defaults to `ColorSpace::srgb`. Windowed devices enable
+`VK_EXT_swapchain_colorspace` when advertised, including devices starting in SDR. Extended output
+requires that extension and an advertised format/color-space pair; use `Format::rgba16_float` with
+`ColorSpace::extended_srgb_linear` for FP16 scRGB output. Unsupported requests fail device creation.
+
+`set_swapchain_format()` changes the pair while retaining the device and application resources.
+Call it on the presentation thread after `wait_idle()`, with no acquired frame. Unsupported pairs
+leave the previous mode usable; a zero-size drawable defers recreation until its extent is nonzero.
+Resize preserves the selected pair. The application owns display/HDR-state detection and must supply
+pixels in the selected color space; the backend does not change OS display settings or tone-map output.
 
 ## Validation
 

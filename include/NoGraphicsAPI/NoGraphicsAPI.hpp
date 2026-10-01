@@ -448,7 +448,7 @@ struct DeviceCaps
 
 enum class ColorSpace : uint32 { srgb, extended_srgb_linear };
 
-// Win32 windowed device creation/destruction, drawable queries, acquire, and presentation stay on the window's message-pump thread.
+// Win32 windowed device lifecycle, swapchain format/extent changes, acquire, and presentation stay on the window's message-pump thread.
 // Metal calls may use a render thread; synchronize CAMetalLayer access with native UI/layer changes.
 // The window/layer must outlive the device. Other calls follow the object-level threading contract below.
 struct DeviceDesc
@@ -690,6 +690,9 @@ void destroy_device(Device* device) noexcept;
 [[nodiscard]] const DeviceCaps& get_device_caps(const Device* device) noexcept;
 [[nodiscard]] bool supports_texture_format(const Device* device, Format format, TextureUsage usage) noexcept;
 [[nodiscard]] uint32x2 get_drawable_extent(Device* device) noexcept;
+// Call after wait_idle, outside an acquired frame. Unsupported pairs leave the current mode unchanged.
+// A zero-size drawable defers swapchain recreation until acquire sees a nonzero extent.
+[[nodiscard]] Error set_swapchain_format(Device* device, Format format, ColorSpace color_space) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;
