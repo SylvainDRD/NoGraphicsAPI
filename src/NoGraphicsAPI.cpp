@@ -656,6 +656,7 @@ struct Device
     DeviceCaps caps;
     VkFormatFeatureFlags2 format_features[format_count]{};
     bool texture_compression_etc2 = false;
+    bool swapchain_color_space_enabled = false;
     VkSemaphore presentation_retirement = VK_NULL_HANDLE;
     uint64 presentation_retirement_value = 0;
     uint64 completed_presentation_retirement = 0;
@@ -1277,6 +1278,7 @@ struct Swapchain
     uint32 width = 0;
     uint32 height = 0;
     Format format = Format::bgra8_srgb;
+    VkColorSpaceKHR color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     detail::PresentContext* present_context = nullptr;
@@ -1627,6 +1629,10 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     if (error != Error::none)
         return fail_device_creation(state, error);
 #if defined(_WIN32)
+    state->swapchain_color_space_enabled = presentation &&
+        has_name({instance_extensions, instance_extension_count}, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
+    if (presentation && desc.swapchain_color_space != ColorSpace::srgb && !state->swapchain_color_space_enabled)
+        return fail_device_creation(state, Error::unsupported);
     const bool khr_surface_maintenance1 = presentation && has_name(
         {instance_extensions, instance_extension_count},
         VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
@@ -1658,7 +1664,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     const bool validation_available = has_name({layers, layer_count}, "VK_LAYER_KHRONOS_validation");
 #endif
 
-    const char* enabled_instance_extensions[6]{};
+    const char* enabled_instance_extensions[7]{};
     uint32 enabled_instance_extension_count = 0;
     const char* enabled_layers[1]{};
     uint32 enabled_layer_count = 0;
@@ -1669,6 +1675,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
 #if defined(_WIN32)
     if (presentation)
     {
+        if (state->swapchain_color_space_enabled)
+            enabled_instance_extensions[enabled_instance_extension_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
         enabled_instance_extensions[enabled_instance_extension_count++] = VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME;
@@ -1948,6 +1956,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
         state->swapchain = new Swapchain;
         state->swapchain->state = state;
         state->swapchain->format = desc.swapchain_format;
+        state->swapchain->color_space = desc.swapchain_color_space == ColorSpace::extended_srgb_linear
+            ? VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
         error = recreate_swapchain(*state->swapchain);
         if (error != Error::none)
             return fail_device_creation(state, error);
@@ -2173,13 +2183,6 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     const VkExtent2D extent = capabilities.currentExtent;
     if (extent.width == UINT_MAX)
         return Error::unsupported;
-    if (extent.width == 0 || extent.height == 0)
-    {
-        swapchain.width = 0;
-        swapchain.height = 0;
-        swapchain.recreate_required = true;
-        return Error::none;
-    }
     if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0)
     {
         return Error::unsupported;
@@ -2202,7 +2205,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     {
         if ((formats[index].format == requested_format ||
              formats[index].format == VK_FORMAT_UNDEFINED) &&
-            formats[index].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            formats[index].colorSpace == swapchain.color_space)
         {
             format_supported = true;
             break;
@@ -2210,6 +2213,14 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
     }
     if (!format_supported)
         return Error::unsupported;
+
+    if (extent.width == 0 || extent.height == 0)
+    {
+        swapchain.width = 0;
+        swapchain.height = 0;
+        swapchain.recreate_required = true;
+        return Error::none;
+    }
 
     uint32 requested_image_count = device.present_context_count;
     if (requested_image_count < capabilities.minImageCount) requested_image_count = capabilities.minImageCount;
@@ -2229,7 +2240,7 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
         .surface = device.surface,
         .minImageCount = requested_image_count,
         .imageFormat = requested_format,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageColorSpace = swapchain.color_space,
         .imageExtent = extent,
         .imageArrayLayers = 1,
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
@@ -2317,6 +2328,34 @@ Error recreate_swapchain(Swapchain& swapchain) noexcept
 }
 
 } // namespace
+
+Error set_swapchain_format(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && !device->acquired_swapchain);
+    if (!device->swapchain || (color_space != ColorSpace::srgb && !device->swapchain_color_space_enabled))
+        return Error::unsupported;
+
+    Swapchain& swapchain = *device->swapchain;
+    const VkColorSpaceKHR requested_color_space = color_space == ColorSpace::extended_srgb_linear
+        ? VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    if (swapchain.format == format && swapchain.color_space == requested_color_space)
+        return Error::none;
+
+    const Format old_format = swapchain.format;
+    const VkColorSpaceKHR old_color_space = swapchain.color_space;
+    swapchain.format = format;
+    swapchain.color_space = requested_color_space;
+    const Error error = recreate_swapchain(swapchain);
+    if (error != Error::none)
+    {
+        swapchain.format = old_format;
+        swapchain.color_space = old_color_space;
+        // vkCreateSwapchainKHR retires oldSwapchain even when creation fails.
+        if (!swapchain.handle)
+            require_error(recreate_swapchain(swapchain));
+    }
+    return error;
+}
 
 uint32x2 get_drawable_extent(Device* device) noexcept
 {
@@ -2470,6 +2509,7 @@ void prepare_texture(Device& device, const TextureDesc& desc, PreparedTexture& o
     }
 
     VkImageCreateFlags image_flags = 0;
+    if (desc.aliasable) image_flags |= VK_IMAGE_CREATE_ALIAS_BIT;
     if (desc.type == TextureType::cube || desc.type == TextureType::cube_array) image_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     if (view_format_count > 1) image_flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
 
@@ -2555,6 +2595,7 @@ Texture* create_texture(CommandBuffer* commands, const TextureDesc& desc, const 
     };
     require_vk(vkCreateImage(device->device, &texture.image_info, nullptr, &result->image));
     require_vk(vkBindImageMemory(device->device, result->image, heap.owner->memory, offset));
+    if (desc.aliasable) return result;
 
     const VkImageMemoryBarrier2 barrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -2579,6 +2620,43 @@ Texture* create_texture(CommandBuffer* commands, const TextureDesc& desc, const 
 void destroy_texture(Texture* texture) noexcept
 {
     delete texture;
+}
+
+void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept
+{
+    assert(commands && texture && commands->state == texture->state);
+    // The outgoing image can have a different format and size, so its writes need a global memory dependency.
+    const VkMemoryBarrier2 memory_barrier{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+    };
+    const VkDependencyInfo dependency{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &memory_barrier,
+    };
+    vkCmdPipelineBarrier2(commands->command_buffer, &dependency);
+    const VkImageMemoryBarrier2 image_barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = texture->image,
+        .subresourceRange = {
+            .aspectMask = image_aspects(texture->format),
+            .levelCount = VK_REMAINING_MIP_LEVELS,
+            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
+    record_image_barriers(commands->command_buffer, {&image_barrier, 1});
 }
 
 RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc) noexcept
