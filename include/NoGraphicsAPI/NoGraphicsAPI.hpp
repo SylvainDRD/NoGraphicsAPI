@@ -565,6 +565,7 @@ struct RasterizationState
     float depth_bias_constant = 0.0f;
     float depth_bias_clamp = 0.0f;
     float depth_bias_slope = 0.0f;
+    float line_width = 1.f;
 };
 
 struct Viewport
