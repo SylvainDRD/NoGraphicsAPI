@@ -453,7 +453,9 @@ struct DeviceCaps
     bool indirect_mesh_draw = false;
 };
 
-// Win32/X11 windowed device creation/destruction, drawable queries, acquire, and presentation stay on the window's message-pump thread.
+enum class ColorSpace : uint32 { srgb, extended_srgb_linear };
+
+// Win32 windowed device lifecycle, swapchain format/extent changes, acquire, and presentation stay on the window's message-pump thread.
 // Metal calls may use a render thread; synchronize CAMetalLayer access with native UI/layer changes.
 // The window/layer must outlive the device. Other calls follow the object-level threading contract below.
 struct DeviceDesc
@@ -462,6 +464,7 @@ struct DeviceDesc
     void* window = nullptr;
     void* display = nullptr; // X11 Display* on Linux, required with a window; ignored elsewhere.
     Format swapchain_format = Format::undefined;
+    ColorSpace swapchain_color_space = ColorSpace::srgb;
     uint32 desired_swapchain_image_count = 2; // Vulkan: 1..8 presentation contexts. Metal clamps to 2..3 drawables.
     // Counts are capped to each family's capacity. A nonzero request requires that kind of queue to be available.
     uint32 desired_queue_count = 1; // General graphics + compute queues; must be nonzero.
@@ -491,6 +494,7 @@ struct TextureDesc
     Format format = Format::rgba8_unorm;
     bool mutable_format = false; // Allow format-compatible descriptor views, but could lose DCC.
     TextureUsage usage = TextureUsage::sampled;
+    bool aliasable = false; // Overlapping placements require activation before each period of use; contents are discarded.
 };
 
 struct RenderViewDesc
@@ -697,6 +701,9 @@ void destroy_device(Device* device) noexcept;
 [[nodiscard]] const DeviceCaps& get_device_caps(const Device* device) noexcept;
 [[nodiscard]] bool supports_texture_format(const Device* device, Format format, TextureUsage usage) noexcept;
 [[nodiscard]] uint32x2 get_drawable_extent(Device* device) noexcept;
+// Call after wait_idle, outside an acquired frame. Unsupported pairs leave the current mode unchanged.
+// A zero-size drawable defers swapchain recreation until acquire sees a nonzero extent.
+[[nodiscard]] Error set_swapchain_format(Device* device, Format format, ColorSpace color_space) noexcept;
 
 [[nodiscard]] TimelineSemaphore* create_timeline_semaphore(Device* device, uint64 initial_value = 0) noexcept;
 void destroy_timeline_semaphore(TimelineSemaphore* semaphore) noexcept;
@@ -726,14 +733,18 @@ template<typename T>
 }
 
 // Texture heaps use one device-selected GPU-only memory type and must outlive every placed texture.
-// Placements must satisfy get_texture_size_align(), remain non-overlapping, and not be reused before the timeline point covering their last use completes.
+// Placements must satisfy get_texture_size_align(). Overlap is allowed only between aliasable textures with disjoint periods of GPU use.
+// Reusing a placement without alias activation requires completion of its last use and destruction of the old texture.
 // DeviceCaps::texture_heap_alignment can be used as a common allocator element size, avoiding per-placement leading alignment padding.
 [[nodiscard]] TextureHeap create_texture_heap(Device* device, uint64 byte_count) noexcept;
 void destroy_texture_heap(const TextureHeap& heap) noexcept;
 [[nodiscard]] SizeAlign get_texture_size_align(Device* device, const TextureDesc& desc) noexcept;
-// Records texture initialization into commands. Use outside of a render pass. Commands must be submitted before other use of the texture.
+// Records ordinary texture initialization into commands, outside a render pass. Submit before use. Aliasable textures defer initialization to activation.
 [[nodiscard]] Texture* create_texture(CommandBuffer* commands, const TextureDesc& desc, const TextureHeap& heap, uint64 offset) noexcept;
 void destroy_texture(Texture* texture) noexcept;
+// Activate an alias outside a render pass before its first use and whenever another alias has used its storage.
+// Discards contents and synchronizes prior uses on this queue; order other queues with timeline waits. Clear or overwrite before reading.
+void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept;
 [[nodiscard]] RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc = {}) noexcept;
 void destroy_render_view(RenderView* render_view) noexcept;
 // Descriptor slots form application-owned namespaces. Writes and copies require indices within capacity;

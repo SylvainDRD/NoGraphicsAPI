@@ -603,6 +603,8 @@ id<MTLBuffer> resolve_buffer(Device* device, GpuRange range, uint64* offset)
 
 DeviceInit create_device(const DeviceDesc& desc) noexcept
 {
+    if (desc.swapchain_color_space != ColorSpace::srgb)
+        return {.error = Error::unsupported};
     @autoreleasepool
     {
         Device* device = new Device{};
@@ -742,6 +744,22 @@ bool supports_texture_format(const Device* device, Format format, TextureUsage u
     if (has_usage(usage, TextureUsage::color_attachment) && (compressed || info.depth || info.stencil)) return false;
     if (has_usage(usage, TextureUsage::depth_stencil_attachment) && !(info.depth || info.stencil)) return false;
     return true;
+}
+
+Error set_swapchain_format(Device* device, Format format, ColorSpace color_space) noexcept
+{
+    assert(device && !device->drawable && !device->acquired);
+    @autoreleasepool
+    {
+        if (!device->layer || color_space != ColorSpace::srgb)
+            return Error::unsupported;
+        if (device->layer.pixelFormat == pixel_format(format))
+            return Error::none;
+        if (format != Format::bgra8_unorm && format != Format::bgra8_srgb)
+            return Error::unsupported;
+        device->layer.pixelFormat = pixel_format(format);
+        return Error::none;
+    }
 }
 
 uint32x2 get_drawable_extent(Device* device) noexcept
@@ -911,6 +929,13 @@ void destroy_texture(Texture* texture) noexcept
         [texture->texture release];
         delete texture;
     }
+}
+
+void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept
+{
+    assert(commands && texture && commands->device == texture->device && texture->desc.aliasable);
+    barrier(commands, Stage::all_commands, Access::transfer_write | Access::shader_write | Access::color_write | Access::depth_stencil_write,
+        Stage::all_commands, Access::none);
 }
 
 RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc) noexcept
