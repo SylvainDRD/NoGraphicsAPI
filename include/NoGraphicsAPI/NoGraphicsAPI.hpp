@@ -320,6 +320,13 @@ enum class CullMode : uint8
     counter_clockwise,
 };
 
+enum class PolygonMode : uint8
+{
+    fill,
+    line,
+    point
+};
+
 enum class BlendFactor : uint8
 {
     zero,
@@ -550,6 +557,7 @@ struct ColorTargetDesc
 struct RasterizationState
 {
     CullMode cull = CullMode::none;
+    PolygonMode polygon = PolygonMode::fill;
     float depth_bias_constant = 0.0f;
     float depth_bias_clamp = 0.0f;
     float depth_bias_slope = 0.0f;

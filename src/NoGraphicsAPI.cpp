@@ -2845,7 +2845,7 @@ PSO* create_raster_pso(Device* device, const ShaderStage& first_stage, const Sha
     };
     const VkPipelineRasterizationStateCreateInfo rasterization{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-        .polygonMode = VK_POLYGON_MODE_FILL,
+        .polygonMode = rasterization_state.polygon == PolygonMode::fill ? VK_POLYGON_MODE_FILL : (rasterization_state.polygon == PolygonMode::line ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_POINT),
         .cullMode = static_cast<VkCullModeFlags>(rasterization_state.cull == CullMode::none ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT),
         .frontFace = rasterization_state.cull == CullMode::counter_clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .depthBiasEnable = rasterization_state.depth_bias_constant != 0.0f ||
