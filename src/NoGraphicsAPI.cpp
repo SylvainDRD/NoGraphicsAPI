@@ -1634,7 +1634,6 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
     error = enumerate_instance_extensions({instance_extensions, max_instance_extensions}, instance_extension_count);
     if (error != Error::none)
         return fail_device_creation(state, error);
-#if defined(_WIN32)
     state->swapchain_color_space_enabled = presentation &&
         has_name({instance_extensions, instance_extension_count}, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
     if (presentation && desc.swapchain_color_space != ColorSpace::srgb && !state->swapchain_color_space_enabled)
