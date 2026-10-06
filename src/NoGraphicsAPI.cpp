@@ -1,4 +1,5 @@
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
+#include <vulkan/vulkan_core.h>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -2987,16 +2988,20 @@ namespace gpu {
             };
             const VkPipelineInputAssemblyStateCreateInfo input_assembly{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-                .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                .topology = rasterization_state.topology == Topology::triangle || rasterization_state.topology == Topology::wireframe_triangle
+                                ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+                                : (rasterization_state.topology == Topology::line ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VK_PRIMITIVE_TOPOLOGY_POINT_LIST),
             };
             const VkPipelineViewportStateCreateInfo viewport_state{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             };
             const VkPipelineRasterizationStateCreateInfo rasterization{
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-                .polygonMode = rasterization_state.polygon == PolygonMode::fill
+                .polygonMode = rasterization_state.topology == Topology::triangle
                                    ? VK_POLYGON_MODE_FILL
-                                   : (rasterization_state.polygon == PolygonMode::line ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_POINT),
+                                   : (rasterization_state.topology == Topology::line || rasterization_state.topology == Topology::wireframe_triangle
+                                          ? VK_POLYGON_MODE_LINE
+                                          : VK_POLYGON_MODE_POINT),
                 .cullMode = static_cast<VkCullModeFlags>(rasterization_state.cull == CullMode::none ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT),
                 .frontFace = rasterization_state.cull == CullMode::counter_clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE,
                 .depthBiasEnable = rasterization_state.depth_bias_constant != 0.0f || rasterization_state.depth_bias_clamp != 0.0f ||
